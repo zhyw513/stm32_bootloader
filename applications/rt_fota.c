@@ -89,14 +89,6 @@
 #define RT_FOTA_SIGNAL_LED_PIN				89
 #endif
 
-#ifndef RT_FOTA_DEFAULT_KEY_PIN
-#define RT_FOTA_DEFAULT_KEY_PIN				68
-#endif
-
-#ifndef RT_FOTA_DEFAULT_KEY_CHK_TIME
-#define RT_FOTA_DEFAULT_KEY_CHK_TIME		10
-#endif
-
 #ifndef RT_FOTA_SIGNAL_LED_THREAD_STACK_SIZE			
 #define RT_FOTA_SIGNAL_LED_THREAD_STACK_SIZE	1024
 #endif
@@ -108,14 +100,10 @@
 /* For signal led */
 static led_t *signal_led =  NULL;
 static led_mem_opreation_t signal_led_mem_op;
-const char *led_shell_mode   = "500,500,"; /* 1Hz  闪烁 */
-const char *led_upgrade_mode = "50,50,";   /* 10Hz 闪烁 */
-const char *led_off_mode     = "0,100,";   /* 常灭 */
-const char *led_on_mode      = "100,0,";   /* 常亮 */
-
-
-/* For default key */
-#define RT_FOTA_DEFAULT_KEY_PIN				68
+const char *led_shell_mode   = "500,500,"; 		/* 1Hz  闪烁 */
+const char *led_upgrade_mode = "50,50,";   		/* 10Hz 闪烁 */
+const char *led_off_mode     = "0,100,";   		/* 常灭 */
+const char *led_on_mode      = "100,0,";   		/* 常亮 */
 
 /* For shell */
 static rt_sem_t shell_sem = RT_NULL;
@@ -768,42 +756,55 @@ int rt_fota_upgrade(const char *part_name)
 	/* it has compress option */
 	if ((part_head->fota_algo & RT_FOTA_CMPRS_STAT_MASK) != RT_FOTA_CRYPT_ALGO_NONE)
 	{
-		if ((block_hdr_pos < fw_raw_len) && ((fw_raw_len - block_hdr_pos) > RT_FOTA_BLOCK_HEADER_SIZE))
-		{
-			rt_memcpy(block_hdr_buf, &crypt_buf[block_hdr_pos], RT_FOTA_BLOCK_HEADER_SIZE);
-			block_size = block_hdr_buf[0] * (1 << 24) + block_hdr_buf[1] * (1 << 16) + block_hdr_buf[2] * (1 << 8) + block_hdr_buf[3];
-			if ((fw_raw_len - block_hdr_pos - RT_FOTA_BLOCK_HEADER_SIZE) >= block_size)
-			{
-				rt_memset(cmprs_buff, 0x0, RT_FOTA_CMPRS_BUFFER_SIZE + padding_size);				
-				rt_memcpy(cmprs_buff, &crypt_buf[block_hdr_pos + RT_FOTA_BLOCK_HEADER_SIZE], block_size);
-				rt_memset(dcprs_buff, 0x0, RT_FOTA_CMPRS_BUFFER_SIZE);
+        while (total_copy_size < part_head->raw_size)
+        {
+            if ((block_hdr_pos < fw_raw_len) && ((fw_raw_len - block_hdr_pos) > RT_FOTA_BLOCK_HEADER_SIZE))
+            {
+                rt_memcpy(block_hdr_buf, &crypt_buf[block_hdr_pos], RT_FOTA_BLOCK_HEADER_SIZE);
+                block_size = block_hdr_buf[0] * (1 << 24) + block_hdr_buf[1] * (1 << 16) + block_hdr_buf[2] * (1 << 8) + block_hdr_buf[3];
+                if ((fw_raw_len - block_hdr_pos - RT_FOTA_BLOCK_HEADER_SIZE) >= block_size)
+                {
+                    rt_memset(cmprs_buff, 0x0, RT_FOTA_CMPRS_BUFFER_SIZE + padding_size);				
+                    rt_memcpy(cmprs_buff, &crypt_buf[block_hdr_pos + RT_FOTA_BLOCK_HEADER_SIZE], block_size);
+                    rt_memset(dcprs_buff, 0x0, RT_FOTA_CMPRS_BUFFER_SIZE);
+                    
+                    block_hdr_pos += (block_size + RT_FOTA_BLOCK_HEADER_SIZE);
 
-				if ((part_head->fota_algo & RT_FOTA_CMPRS_STAT_MASK) == RT_FOTA_CMPRS_ALGO_FASTLZ) 
-				{
-					dcprs_size = fastlz_decompress((const void *)&cmprs_buff[0], block_size, &dcprs_buff[0], RT_FOTA_CMPRS_BUFFER_SIZE);
-				}
-				else if ((part_head->fota_algo & RT_FOTA_CMPRS_STAT_MASK) == RT_FOTA_CMPRS_ALGO_QUICKLZ) 
-				{
-					dcprs_size = qlz_decompress((const char *)&cmprs_buff[0], &dcprs_buff[0], dcprs_state);
-				}
-			
-				if (dcprs_size <= 0)
-				{
-					LOG_D("Decompress failed: %d.", dcprs_size);
-					fota_err = RT_FOTA_GENERAL_ERR;
-					goto __exit_upgrade;
-				}
+                    if ((part_head->fota_algo & RT_FOTA_CMPRS_STAT_MASK) == RT_FOTA_CMPRS_ALGO_FASTLZ) 
+                    {
+                        dcprs_size = fastlz_decompress((const void *)&cmprs_buff[0], block_size, &dcprs_buff[0], RT_FOTA_CMPRS_BUFFER_SIZE);
+                    }
+                    else if ((part_head->fota_algo & RT_FOTA_CMPRS_STAT_MASK) == RT_FOTA_CMPRS_ALGO_QUICKLZ) 
+                    {
+                        dcprs_size = qlz_decompress((const char *)&cmprs_buff[0], &dcprs_buff[0], dcprs_state);
+                    }
+                
+                    if (dcprs_size <= 0)
+                    {
+                        LOG_D("Decompress failed: %d.", dcprs_size);
+                        fota_err = RT_FOTA_GENERAL_ERR;
+                        goto __exit_upgrade;
+                    }
 
-				if (rt_fota_write_app_part(total_copy_size, dcprs_buff, dcprs_size) < 0)
-				{
-					fota_err = RT_FOTA_COPY_FAILED;
-					goto __exit_upgrade;
-				}
+                    if (rt_fota_write_app_part(total_copy_size, dcprs_buff, dcprs_size) < 0)
+                    {
+                        fota_err = RT_FOTA_COPY_FAILED;
+                        goto __exit_upgrade;
+                    }
 
-				total_copy_size += dcprs_size;
-				rt_kprintf("#");
-			}
-		}
+                    total_copy_size += dcprs_size;
+                    rt_kprintf("#");
+                }
+                else
+                {
+                    break;
+                }                                
+            }
+            else
+            {
+                break;
+            }
+        }
 	}
     rt_kprintf("\r\n");
 
@@ -871,15 +872,27 @@ static int rt_fota_start_application(void)
 		goto __exit_start_application;
 	}
 
-	LOG_I("Implement application now.");
-    
+	LOG_I("Implement application now.");      
+        
     __disable_irq();
+    for (IRQn_Type irq = WWDG_IRQn; irq <= FPU_IRQn; irq++)
+    {
+        HAL_NVIC_DisableIRQ(irq);
+        HAL_NVIC_ClearPendingIRQ(irq);
+    }
+    //Resets the RCC clock configuration to the default reset state.
+    HAL_RCC_DeInit();
+    
+    SysTick->CTRL = 0;
+    SysTick->LOAD = 0;
+    SysTick->VAL = 0;
     HAL_DeInit();
 
 	//用户代码区第二个字为程序开始地址(复位地址)
 	app_func = (rt_fota_app_func)*(__IO uint32_t *)(app_addr + 4);
-	/* Configure main stack */
-	__set_MSP(*(__IO uint32_t *)app_addr);
+	/* Configure main stack */ 
+	__set_MSP(*(__IO uint32_t *)app_addr);       
+           
 	/* jump to application */
 	app_func();
 	
@@ -980,6 +993,8 @@ static rt_err_t rt_fota_set_device(const char *device_name)
 	return RT_ERROR;
 }
 
+
+#if defined(RT_FOTA_DEFAULT_KEY_PIN) && defined(RT_FOTA_DEFAULT_KEY_CHK_TIME)
 static rt_err_t rt_fota_check_defalut_key(void)
 {   
     int chk_idx;
@@ -1004,6 +1019,7 @@ static rt_err_t rt_fota_check_defalut_key(void)
 	else
 		return RT_EOK;
 }
+#endif
 
 void rt_fota_thread_entry(void *arg)
 {
@@ -1020,6 +1036,7 @@ void rt_fota_thread_entry(void *arg)
 		LOG_I("Partition initialized failed.");
 	}
 
+#if defined(RT_FOTA_DEFAULT_KEY_PIN) && defined(RT_FOTA_DEFAULT_KEY_CHK_TIME)
 	/* Default key check */
 	if (rt_fota_check_defalut_key() == RT_EOK)
 	{
@@ -1027,6 +1044,7 @@ void rt_fota_thread_entry(void *arg)
 		rt_fota_signal_led_mode(led_upgrade_mode);
 		goto __exit_default_entry;
 	}
+#endif
 
 	/* Shell initialized */
 	if (rt_fota_set_device(RT_CONSOLE_DEVICE_NAME) == RT_EOK)
@@ -1068,7 +1086,10 @@ __exit_boot_entry:
 	/* Implement application */
 	rt_fota_start_application();
 
+#if defined(RT_FOTA_DEFAULT_KEY_PIN) && defined(RT_FOTA_DEFAULT_KEY_CHK_TIME)
 __exit_default_entry:
+#endif
+
 	/* Implement upgrade, copy default partition to app partition */
 	if (rt_fota_part_fw_verify(RT_FOTA_DF_PART_NAME) == RT_FOTA_NO_ERR)
 	{
